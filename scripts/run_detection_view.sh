@@ -13,7 +13,7 @@ python3 publish_book_detection_view.py \
   --output_topic /book_detection/image_raw/compressed \
   --model models/book_spine_detector.pt \
   --conf 0.35 \
-  --ocr_interval 0.8 \
+  --ocr_interval 0.7 \
   --min_match 0.90 \
   --confirm_hits 1 \
   --track_distance 25 \
