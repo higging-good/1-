@@ -1,0 +1,7 @@
+easyocr
+numpy
+opencv-python
+ultralytics
+
+# ROS 2 packages (rclpy, cv_bridge, sensor_msgs, geometry_msgs, std_msgs)
+# are installed through the system's ROS 2 distribution, not pip.

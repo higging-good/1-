@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+build/
+install/
+log/
+backups/
+outputs/
+.vscode/
+.idea/
+*.bag
+*.db3
+*.avi
+*.mov
