@@ -455,3 +455,129 @@ source /opt/ros/humble/setup.bash
 source ~/astra_ws/install/setup.bash
 
 ./scripts/run_astra_camera.sh
+# Astra RGB-D 기반 도서 인식 시스템
+
+## 1. 프로젝트 소개
+
+Astra RGB-D 카메라를 이용하여 책장에서 목표 도서를 인식하는 시스템입니다.
+
+주요 기능:
+
+- YOLOv8-OBB 기반 책등 검출
+- 회전된 책등 인식
+- OCR 기반 도서명 인식
+- 목표 도서 판단
+- Depth 기반 목표 도서 거리 계산
+- OBB 기반 책 기울기 각도 계산
+- ROS2 기반 실시간 영상 출력
+
+---
+
+# 2. 개발 환경
+
+## Hardware
+
+- Orbbec Astra Mini RGB-D Camera
+
+## Software
+
+- Ubuntu 22.04
+- ROS2 Humble
+- Python 3.10
+- YOLOv8-OBB
+- EasyOCR
+- OpenCV
+
+
+---
+
+# 3. 프로젝트 다운로드
+
+```bash
+cd ~/Desktop
+
+git clone https://github.com/higging-good/1-.git
+
+cd 졸작
+4. Python 환경 설정
+
+가상환경 생성:
+
+python3 -m venv .venv
+
+source .venv/bin/activate
+
+필요 라이브러리 설치:
+
+pip install --upgrade pip
+
+pip install -r requirements.txt
+5. Astra RGB-D 카메라 드라이버 설치
+
+Astra Mini는 ROS2 카메라 드라이버가 필요합니다.
+
+Astra workspace 생성
+cd ~
+
+mkdir -p ~/astra_ws/src
+
+cd ~/astra_ws/src
+Astra ROS2 Driver 다운로드
+git clone https://github.com/orbbec/ros2_astra_camera.git
+빌드
+cd ~/astra_ws
+
+source /opt/ros/humble/setup.bash
+
+rosdep install --from-paths src --ignore-src -r -y
+
+colcon build
+
+환경 적용:
+
+source /opt/ros/humble/setup.bash
+
+source ~/astra_ws/install/setup.bash
+
+설치 확인:
+
+ros2 pkg list | grep astra_camera
+
+정상 출력:
+
+astra_camera
+6. Astra 카메라 실행
+
+터미널 1:
+
+cd ~/Desktop/졸작
+
+source /opt/ros/humble/setup.bash
+
+source ~/astra_ws/install/setup.bash
+
+./scripts/run_astra_camera.sh
+
+정상 실행 확인:
+
+ros2 topic list
+
+예상 토픽:
+
+/camera/color/image_raw
+7. 실시간 책 라벨링 데모
+
+---
+
+### 5. GitHub 업데이트
+
+터미널:
+
+```bash
+cd ~/Desktop/졸작
+
+git add README.md
+
+git commit -m "Update README with installation and demo guide"
+
+git push origin main
