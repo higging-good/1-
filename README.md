@@ -420,3 +420,38 @@ Astra 카메라를 다른 프로세스가 잡고 있는 상태입니다.
 Physical AI Manager 입력 토픽:
 
     /book_detection/image_raw/compressed
+
+
+## Astra RGB-D 카메라 ROS2 환경
+
+본 프로젝트의 실시간 책 인식 기능은 Astra RGB-D 카메라와 ROS2 카메라 드라이버가 필요합니다.
+
+Astra 카메라 패키지는 프로젝트 Git 저장소와 별도의 ROS2 workspace에서 관리됩니다.
+
+필수 workspace:
+
+~/astra_ws
+
+실행 전 Astra workspace를 source 해야 합니다.
+
+source /opt/ros/humble/setup.bash
+source ~/astra_ws/install/setup.bash
+
+정상 설치 확인:
+
+ros2 pkg list | grep astra_camera
+
+정상 출력:
+astra_camera
+
+오류 발생:
+Package "astra_camera" not found
+
+/home/user/astra_ws/install/setup.bash: No such file or directory
+
+Astra 카메라 실행:
+
+source /opt/ros/humble/setup.bash
+source ~/astra_ws/install/setup.bash
+
+./scripts/run_astra_camera.sh
