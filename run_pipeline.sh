@@ -6,13 +6,19 @@ cd "$PROJECT_DIR"
 export MPLCONFIGDIR="${TMPDIR:-/tmp}/book-bounding-matplotlib"
 mkdir -p "$MPLCONFIGDIR"
 
-TITLE="${1:-}"
-RGB_IMAGE="${2:-}"
-DEPTH_FILE="${3:-}"
+# 책 제목은 항상 실행 중 직접 입력한다.
+# 명령어 뒤에 제목을 붙여도 사용하지 않는다.
+TITLE=""
+RGB_IMAGE=""
+DEPTH_FILE=""
 
-if [[ -z "$TITLE" ]]; then
-    read -r -p "찾을 책 제목: " TITLE
+if [[ $# -gt 0 ]]; then
+    echo "[INFO] 명령행 인자는 사용하지 않습니다."
+    echo "[INFO] 책 제목은 아래 입력창에서 직접 입력하세요."
 fi
+
+read -r -p "찾을 책 제목: " TITLE
+
 if [[ -z "$TITLE" ]]; then
     echo "[ERROR] 책 제목이 비어 있습니다."
     exit 1
@@ -47,7 +53,28 @@ echo "[5/5] 로봇 연동용 JSON 생성"
 python3 src/export_robot_target.py
 python3 src/log_result.py
 
+echo "[추가] 결과 이미지에 거리/각도 표시"
+python3 src/annotate_result_image.py
+
 echo
 cat outputs/final_result.txt
 echo "결과 이미지: outputs/target_result_depth.jpg"
 echo "로봇용 JSON: outputs/book_target_output.json"
+
+echo
+echo "결과 이미지 자동 열기 시도..."
+
+# Auto open result image
+if [[ -f "outputs/target_result_depth.jpg" ]]; then
+    if command -v xdg-open >/dev/null 2>&1; then
+        nohup xdg-open "outputs/target_result_depth.jpg" >/dev/null 2>&1 &
+    elif command -v code >/dev/null 2>&1; then
+        code -r "outputs/target_result_depth.jpg"
+    else
+        echo "이미지 열기 프로그램을 찾지 못했습니다."
+        echo "직접 열기: outputs/target_result_depth.jpg"
+    fi
+else
+    echo "결과 이미지가 없습니다: outputs/target_result_depth.jpg"
+fi
+
