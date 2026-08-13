@@ -48,7 +48,7 @@ python3 publish_book_detection_view.py \
   --output_topic /book_detection/image_raw/compressed \
   --raw_output_topic /book_detection/image_raw \
   --model models/book_spine_detector.pt \
-  --conf 0.35 \
+  --conf "${BOOK_CONFIDENCE:-0.40}" \
   --ocr_interval 0.7 \
   --min_match 0.90 \
   --confirm_hits 1 \

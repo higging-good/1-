@@ -153,6 +153,7 @@ BOOK_CAMERA_TOPIC=/my_camera/color/image_raw ./scripts/run_detection_view.sh
 | 설정 | 기본값 | 용도 |
 |---|---|---|
 | `BOOK_CAMERA_TOPIC` | `/camera2/color/image_raw` | 북디텍션 입력 영상 |
+| `BOOK_CONFIDENCE` | `0.40` | YOLO 책 검출 임계값; 높일수록 초록색 오탐 감소 |
 | `ROS_DOMAIN_ID` | `30` | ROS 2 통신 도메인 |
 | `ROS_LOCALHOST_ONLY` | `0` | 다른 프로세스·컨테이너 통신 허용 |
 | `BOOK_RMW_IMPLEMENTATION` | `rmw_fastrtps_cpp` | 북디텍션에서 사용할 RMW |
@@ -162,6 +163,14 @@ BOOK_CAMERA_TOPIC=/my_camera/color/image_raw ./scripts/run_detection_view.sh
 
 북디텍션 실행기는 `CUDA_VISIBLE_DEVICES=""`를 설정하고 `--gpu`를 사용하지 않으므로
 GPU가 장착된 컴퓨터에서도 CPU로 실행됩니다.
+
+책이 아닌 물체에 초록색 박스가 많이 생기면 임계값을 조금 높여 실행할 수 있습니다.
+
+```bash
+BOOK_CONFIDENCE=0.45 ./scripts/run_detection_view.sh
+```
+
+반대로 실제 책이 잘 검출되지 않으면 `0.35` 정도로 낮출 수 있습니다.
 
 ## 3. 결과 및 데모 방법
 
