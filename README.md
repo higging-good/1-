@@ -160,6 +160,7 @@ BOOK_CAMERA_TOPIC=/my_camera/color/image_raw ./scripts/run_detection_view.sh
 | `BOOK_OCR_CANDIDATES` | `4` | 한 OCR 주기에서 순환 처리할 책 수 |
 | `BOOK_OCR_INTERVAL` | `0.2` | OCR 완료 후 다음 인식을 시작하는 최소 간격(초) |
 | `BOOK_MIN_MATCH` | `0.80` | 목표 제목을 빨간 박스로 확정하는 최소 유사도 |
+| `BOOK_YOLO_INTERVAL` | `0.15` | YOLO 박스를 새로 계산하는 간격(초) |
 | `ROS_DOMAIN_ID` | `30` | ROS 2 통신 도메인 |
 | `ROS_LOCALHOST_ONLY` | `0` | 다른 프로세스·컨테이너 통신 허용 |
 | `BOOK_RMW_IMPLEMENTATION` | `rmw_fastrtps_cpp` | 북디텍션에서 사용할 RMW |

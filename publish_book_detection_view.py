@@ -11,7 +11,7 @@ import numpy as np
 import rclpy
 import torch
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image, CompressedImage
 from cv_bridge import CvBridge
 from ultralytics import YOLO
@@ -200,15 +200,17 @@ class BookDetectionViewPublisher(Node):
             Image,
             args.input_topic,
             self.image_callback,
-            qos_profile_sensor_data,
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT),
         )
 
         self.lock = threading.Lock()
         self.ocr_busy = False
         self.last_ocr_time = 0.0
         self.last_pub_time = 0.0
+        self.last_yolo_time = 0.0
         self.last_status_time = 0.0
         self.frame_count = 0
+        self.cached_detections = []
 
         self.target_center = None
         self.candidate_center = None
@@ -345,11 +347,17 @@ class BookDetectionViewPublisher(Node):
             self.get_logger().warn(f"이미지 변환 실패: {e}")
             return
 
-        try:
-            detections = self.detect_books(frame)
-        except Exception as e:
-            self.get_logger().warn(f"YOLO 검출 실패: {e}")
-            detections = []
+        # Publish fresh camera frames with the latest boxes while refreshing
+        # CPU-heavy YOLO at a lower rate. A depth-1 input queue also drops stale
+        # frames instead of showing an increasingly delayed video.
+        if now - self.last_yolo_time >= self.args.yolo_interval:
+            try:
+                self.cached_detections = self.detect_books(frame)
+            except Exception as e:
+                self.get_logger().warn(f"YOLO 검출 실패: {e}")
+            self.last_yolo_time = time.time()
+
+        detections = self.cached_detections
 
         draw = frame.copy()
 
@@ -445,6 +453,7 @@ def parse_args():
     parser.add_argument("--ocr_interval", type=float, default=2.5)
     parser.add_argument("--min_match", type=float, default=0.75)
     parser.add_argument("--fps", type=float, default=15.0)
+    parser.add_argument("--yolo_interval", type=float, default=0.15)
     parser.add_argument("--confirm_hits", type=int, default=2)
     parser.add_argument("--track_distance", type=float, default=70.0)
     parser.add_argument("--jpeg_quality", type=int, default=80)
@@ -477,7 +486,7 @@ def main():
     node = BookDetectionViewPublisher(args)
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, RuntimeError):
         pass
     finally:
         cv2.destroyAllWindows()

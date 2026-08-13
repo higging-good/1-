@@ -54,6 +54,7 @@ python3 publish_book_detection_view.py \
   --confirm_hits 1 \
   --track_distance 25 \
   --fps 15 \
+  --yolo_interval "${BOOK_YOLO_INTERVAL:-0.15}" \
   --ocr_max_candidates "${BOOK_OCR_CANDIDATES:-4}" \
   --torch_threads 4 \
   --languages auto
