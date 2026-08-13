@@ -3,7 +3,7 @@
 작성 시간: Mon 10 Aug 2026 03:40:25 PM KST
 
 ## 프로젝트 경로
-~/Desktop/졸작
+~/Desktop/book_detection_project
 
 ## 오늘 목표
 1. 기존 책 찾기 데모 유지

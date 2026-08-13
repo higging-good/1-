@@ -1,318 +1,292 @@
-Book Detection for Physical AI
+# CPU Book Detection for ROS 2 / Physical AI
 
-Astra RGB-D Camera와 YOLOv8-OBB, EasyOCR을 이용한 목표 도서 인식 시스템입니다.
+Astra 카메라 영상에서 YOLOv8-OBB로 책등을 검출하고 EasyOCR로 사용자가 입력한
+책 제목을 찾는 ROS 2 프로젝트입니다. 일반 책은 초록색, 목표 책은 빨간색 OBB로
+표시하며 결과를 Physical AI Manager에서 사용할 수 있는 영상 토픽으로 발행합니다.
 
-본 프로젝트는 Physical AI Manager와 OMX 로봇팔 Imitation Learning에서 사용할 수 있도록 책 인식 결과를 ROS2 영상 토픽으로 생성하는 것을 목표로 합니다.
+![Book detection demo](docs/book_detection_demo.gif)
 
-주요 기능:
+## 주요 특징
 
-YOLOv8-OBB 기반 책등 검출
-회전된 책등 인식
-EasyOCR 기반 도서명 인식
-목표 도서 판단
-RGB-D Depth 기반 거리 계산
-OBB 기반 책 기울기 각도 계산
-ROS2 기반 라벨링 영상 토픽 생성
-1. 새 컴퓨터 설치 방법
-1-1. 개발 환경
+- GPU가 없는 컴퓨터에서도 실행되는 CPU 전용 기본 설정
+- 세로·회전된 책등을 위한 YOLOv8 OBB 검출
+- 영어 및 한글 제목 OCR과 유사도 기반 매칭
+- OpenCV 실시간 뷰어 자동 실행
+- ROS 2 raw 및 compressed 결과 동시 발행
+- Physical AI Manager의 `web_video_server`와 호환되는 RELIABLE QoS
+- 설치 위치와 Linux 사용자명에 의존하지 않는 실행 스크립트
+- 한 대 카메라와 두 대 카메라 구성을 모두 지원
 
-필수 환경:
+## 1. 새 컴퓨터 설치 및 시작
 
-Ubuntu 22.04
-ROS2 Humble
-Python 3.10
-Git
-Orbbec Astra Mini RGB-D Camera
+### 1.1 권장 환경
 
-1-2. ROS2 Humble 설치
+- Ubuntu 22.04
+- ROS 2 Humble
+- Python 3.10
+- Git
+- Orbbec Astra 계열 RGB 카메라와 동작하는 ROS 2 드라이버
 
-Ubuntu 22.04 환경에서 ROS2 Humble 설치 후 진행합니다.
+시스템 패키지를 먼저 준비합니다.
 
-설치 확인:
+```bash
+sudo apt update
+sudo apt install -y git python3-venv python3-pip \
+  python3-opencv ros-humble-cv-bridge ros-humble-sensor-msgs \
+  ros-humble-rmw-fastrtps-cpp
+```
 
-ros2 --version
+ROS 2 Humble 설치 자체는 공식 ROS 2 설치 문서를 따릅니다. 설치 확인:
 
-1-3. Astra Mini RGB-D Camera Driver 설치
-
-본 프로젝트는 Orbbec Astra Mini RGB-D Camera를 사용합니다.
-
-ROS2에서 Astra 카메라 데이터를 사용하기 위해 Orbbec ROS2 Camera Driver 설치가 필요합니다.
-
-Astra workspace 생성
-
-cd ~
-
-mkdir -p ~/astra_ws/src
-
-cd ~/astra_ws/src
-
-Orbbec Astra Driver 다운로드
-
-git clone https://github.com/orbbec/ros2_astra_camera.git
-
-Driver 빌드
-
-cd ~/astra_ws
-
+```bash
 source /opt/ros/humble/setup.bash
+ros2 pkg list | grep -E 'cv_bridge|sensor_msgs'
+```
 
-rosdep update
+### 1.2 프로젝트 다운로드
 
-rosdep install --from-paths src --ignore-src -r -y
+저장소 이름은 `1-`이지만 로컬 폴더 이름은 영문으로 지정합니다.
 
-colcon build
-
-환경 적용:
-
-source ~/astra_ws/install/setup.bash
-
-설치 확인:
-
-ros2 pkg list | grep astra_camera
-
-정상 출력:
-
-astra_camera
-
-1-4. 프로젝트 다운로드
-
+```bash
 cd ~/Desktop
+git clone https://github.com/higging-good/1-.git book_detection_project
+cd book_detection_project
+```
 
-git clone https://github.com/higging-good/1-.git 졸작
+`졸작` 같은 한글 경로는 OpenCV/Qt 환경에 따라 깨질 수 있으므로 사용하지 않는 것을
+권장합니다. 프로젝트는 다른 위치에 clone해도 스크립트가 현재 위치를 자동 감지합니다.
 
-cd ~/Desktop/졸작
+### 1.3 Python 환경 설치
 
-2. 프로젝트 환경 설치
-2-1. Python 가상환경 생성
+```bash
+./scripts/install.sh
+```
 
-python3 -m venv .venv
+설치 스크립트가 다음 작업을 수행합니다.
 
-source .venv/bin/activate
+- `.venv` 생성
+- PyTorch 및 TorchVision CPU wheel 설치
+- Python 패키지 설치
+- NumPy 2.x와 ROS `cv_bridge`의 호환 문제 방지
+- 실행 권한 설정
+- YOLO 모델과 주요 패키지 확인
 
-2-2. Python 패키지 설치
+`.venv`는 Git에 포함되지 않으므로 새 컴퓨터마다 한 번 실행해야 합니다.
 
-pip install --upgrade pip
+### 1.4 카메라 드라이버 확인
 
-pip install -r requirements.txt
+이 프로젝트는 다음 workspace 중 설치된 것을 자동 탐색합니다.
 
-2-3. 실행 권한 설정
+```text
+~/orbbec_ws/install/setup.bash
+~/astra_ws/install/setup.bash
+```
 
-chmod +x scripts/*.sh
+다른 위치에 설치했다면 실행할 때 지정할 수 있습니다.
 
-3. 코드 설명 및 데모 방법
-3-1. 주요 파일
+```bash
+ORBBEC_WS=/path/to/orbbec_ws ./scripts/run_detection_view.sh
+```
 
-publish_book_detection_view.py
+카메라 드라이버 설치 방법은 카메라 모델과 기존 시스템 구성에 따라 다르므로 해당
+드라이버 저장소의 ROS 2 Humble 빌드 안내를 따르십시오.
 
-실시간 책 라벨링 ROS2 토픽 생성 코드
+## 2. 빠른 실행 가이드
 
-scripts/run_detection_view.sh
+### 현재 Physical AI 두 카메라 구성
 
-실시간 책 라벨링 실행
+터미널 1에서 카메라 두 대를 실행합니다. 이 파일은 현재 시스템용 외부 실행기입니다.
 
-scripts/run_astra_camera.sh
+```bash
+~/run_two_astra_clean.sh
+```
 
-Astra 카메라 실행
+터미널 2에서 북디텍션을 실행합니다.
 
-scripts/check_detection_topic.sh
-
-책 라벨링 토픽 확인
-
-run_pipeline.sh
-
-RGB-D 촬영 → YOLO → OCR → 거리 계산 → 결과 생성
-
-record_boxing_process_video.py
-
-발표용 영상 저장
-
-models/book_spine_detector.pt
-
-YOLOv8-OBB 학습 모델
-
-3-2. Astra 카메라 실행
-
-터미널 1:
-
-cd ~/Desktop/졸작
-
-source /opt/ros/humble/setup.bash
-
-source ~/astra_ws/install/setup.bash
-
-./scripts/run_astra_camera.sh
-
-정상 토픽:
-
-/camera/color/image_raw
-
-/camera/depth/image_raw
-
-3-3. 실시간 책 라벨링 실행 (주요 기능)
-
-터미널 2:
-
-cd ~/Desktop/졸작
-
-source /opt/ros/humble/setup.bash
-
-source ~/astra_ws/install/setup.bash
-
-source .venv/bin/activate
-
+```bash
+cd ~/Desktop/book_detection_project
 ./scripts/run_detection_view.sh
+```
 
-실행 후:
+또는 현재 컴퓨터에 등록된 함수로 실행합니다.
 
-찾을 책 제목 입력
+```bash
+run_detection
+```
 
-예:
+프롬프트에 책 제목을 입력합니다.
 
-BUTTER
+```text
+찾을 책 제목을 입력하세요: BUTTER
+```
 
-결과:
+현재 기본 입력은 `/camera2/color/image_raw`입니다.
 
-일반 책 → 초록색 박스
+### 카메라 한 대인 컴퓨터
 
-목표 책 → 빨간색 박스
+카메라 토픽을 확인합니다.
 
-생성 토픽:
+```bash
+ros2 topic list | grep image_raw
+```
 
+일반적인 한 대 카메라 토픽이 `/camera/color/image_raw`라면 다음처럼 실행합니다.
+
+```bash
+BOOK_CAMERA_TOPIC=/camera/color/image_raw ./scripts/run_detection_view.sh
+```
+
+카메라 네임스페이스가 다르면 실제 토픽으로 바꾸면 됩니다.
+
+```bash
+BOOK_CAMERA_TOPIC=/my_camera/color/image_raw ./scripts/run_detection_view.sh
+```
+
+책 제목을 명령행에서 바로 지정할 수도 있습니다.
+
+```bash
+./scripts/run_detection_view.sh "BUTTER"
+```
+
+### 환경변수 기본값
+
+| 설정 | 기본값 | 용도 |
+|---|---|---|
+| `BOOK_CAMERA_TOPIC` | `/camera2/color/image_raw` | 북디텍션 입력 영상 |
+| `ROS_DOMAIN_ID` | `30` | ROS 2 통신 도메인 |
+| `ROS_LOCALHOST_ONLY` | `0` | 다른 프로세스·컨테이너 통신 허용 |
+| `BOOK_RMW_IMPLEMENTATION` | `rmw_fastrtps_cpp` | 북디텍션에서 사용할 RMW |
+| `FASTRTPS_DEFAULT_PROFILES_FILE` | `config/fastdds_udp_only.xml` | UDP 전송 프로파일 |
+| `ORBBEC_WS` | `~/orbbec_ws` | Orbbec workspace 위치 |
+| `ASTRA_WS` | `~/astra_ws` | Astra workspace 위치 |
+
+북디텍션 실행기는 `CUDA_VISIBLE_DEVICES=""`를 설정하고 `--gpu`를 사용하지 않으므로
+GPU가 장착된 컴퓨터에서도 CPU로 실행됩니다.
+
+## 3. 결과 및 데모 방법
+
+실행 결과:
+
+- 검출된 일반 책: 초록색 OBB
+- OCR로 찾은 목표 책: 빨간색 OBB
+- `q`: OpenCV 뷰어 종료
+
+발행 토픽:
+
+```text
+/book_detection/image_raw
 /book_detection/image_raw/compressed
+```
 
-Physical AI Manager에서는 해당 토픽을 카메라 입력으로 사용합니다.
+토픽과 실제 FPS 확인:
 
-3-4. 전체 Pipeline 실행
+```bash
+./scripts/check_detection_topic.sh
+```
 
-실행:
+Physical AI Manager에서는 Robot Type을 `omx_f`로 선택하고 다음 영상을 선택합니다.
 
-./run_pipeline.sh
+```text
+/camera1/color/image_raw
+/book_detection/image_raw
+```
 
-입력:
+Manager 화면에는 raw 이름만 표시되지만 웹 영상 서버는 내부적으로 compressed 결과를
+사용합니다.
 
-찾을 책 제목:
+발표용 영상 녹화:
 
-예:
-
-BUTTER
-
-생성 결과:
-
-outputs/book_target_output.json
-
-outputs/final_result.txt
-
-outputs/target_result_depth.jpg
-
-결과 이미지에는:
-
-목표 책 위치
-거리값
-책 기울기 각도
-
-가 표시됩니다.
-
-3-5. 발표용 영상 저장
-
-실행:
-
+```bash
 ./scripts/run_record_demo_video.sh
+```
 
-저장 위치:
+결과는 `outputs/videos/`에 저장됩니다.
 
-outputs/videos/
+RGB-D 거리 계산을 포함한 기존 전체 파이프라인:
 
-4. Imitation Learning 연동 방법
-
-본 시스템은 OMX 로봇팔 Imitation Learning의 Vision 입력 데이터 생성에 활용됩니다.
-
-데이터 흐름:
-
-Astra RGB-D Camera
-
-↓
-
-YOLOv8-OBB 책 검출
-
-↓
-
-목표 책 위치 계산
-
-↓
-
-Depth 기반 거리 계산
-
-↓
-
-책 방향 및 각도 계산
-
-↓
-
-Robot Action 데이터 생성
-
-↓
-
-Imitation Learning 학습
-
-↓
-
-로봇팔 책 집기 수행
-
-Physical AI Manager 입력 토픽:
-
-/book_detection/image_raw/compressed
-
-추천 데이터 구성:
-
-dataset/
-
-image/
-
-depth/
-
-book_position/
-
-distance/
-
-angle/
-
-robot_action/
-
-주의:
-
-학습 데이터 수집 환경과 실제 추론 환경의 카메라 입력 형태는 동일하게 유지해야 합니다.
-
-5. 삭제 및 재설치 방법
-프로젝트 삭제
-
-cd ~/Desktop
-
-rm -rf 졸작
-
-Astra Driver 삭제
-
-rm -rf ~/astra_ws
-
-다시 설치
-
-cd ~/Desktop
-
-git clone https://github.com/higging-good/1-.git 졸작
-
-빠른 실행 요약
-
-카메라 실행:
-
-./scripts/run_astra_camera.sh
-
-실시간 책 라벨링:
-
-./scripts/run_detection_view.sh
-
-전체 Pipeline:
-
+```bash
+source .venv/bin/activate
 ./run_pipeline.sh
+```
 
-Physical AI Manager 입력:
+이 파이프라인은 depth 토픽이 활성화된 단일 Astra 구성용이며, 실시간 Physical AI
+북디텍션 데모와는 별도 기능입니다.
 
-/book_detection/image_raw/compressed
+## 4. 중요 코드 간략 설명
+
+| 파일 | 역할 |
+|---|---|
+| `publish_book_detection_view.py` | 카메라 구독, YOLO OBB, OCR, 제목 매칭, 박스 표시 및 ROS 결과 발행 |
+| `view_book_detection.py` | 시스템 OpenCV로 raw 결과를 표시하는 독립 GUI 뷰어 |
+| `scripts/run_detection_view.sh` | ROS/FastDDS/CPU 환경 설정, 뷰어와 추론 프로세스 실행·종료 관리 |
+| `scripts/install.sh` | 새 컴퓨터의 Python 환경 설치와 모델 검증 |
+| `scripts/check_detection_topic.sh` | 결과 토픽 타입·메시지·FPS 확인 |
+| `scripts/run_astra_camera.sh` | 단일 `ros2_astra_camera` RGB 카메라 실행 |
+| `scripts/run_record_demo_video.sh` | 발표용 데모 영상 녹화 |
+| `run_pipeline.sh` | RGB-D 캡처부터 거리·각도·로봇용 JSON까지 생성하는 기존 파이프라인 |
+| `models/book_spine_detector.pt` | 학습된 YOLOv8-OBB 책등 검출 모델 |
+| `config/fastdds_udp_only.xml` | 호스트와 컨테이너 통신용 Fast DDS UDP 프로파일 |
+
+실시간 처리 흐름:
+
+```text
+camera image
+  -> YOLOv8-OBB book-spine detection
+  -> rotated crop generation
+  -> EasyOCR in multiple orientations
+  -> target-title similarity matching
+  -> green/red OBB drawing
+  -> raw + JPEG compressed ROS topics
+```
+
+## 5. 업데이트 방법
+
+로컬 수정이 없다면:
+
+```bash
+cd ~/Desktop/book_detection_project
+git pull origin main
+./scripts/install.sh
+```
+
+`requirements.txt`가 변경될 수 있으므로 업데이트 후 설치 스크립트를 다시 실행하는 것이
+안전합니다.
+
+## 6. 프로젝트 삭제
+
+프로젝트 폴더, `.venv`, 생성 결과를 모두 삭제하려면 프로젝트 안에서 실행합니다.
+
+```bash
+cd ~/Desktop/book_detection_project
+./scripts/uninstall.sh
+```
+
+스크립트는 다음 조건을 모두 확인한 뒤에만 삭제합니다.
+
+- 현재 폴더가 Git 저장소인지 확인
+- `origin`이 `https://github.com/higging-good/1-.git`인지 확인
+- 실제 삭제 대상 절대 경로 출력
+- `DELETE book_detection_project` 확인 문구 요구
+
+ROS 2, 카메라 드라이버 workspace 및 시스템 패키지는 다른 프로젝트에서도 사용할 수
+있으므로 삭제하지 않습니다.
+
+## 문제 해결
+
+카메라 토픽이 안 보이는 경우:
+
+```bash
+source /opt/ros/humble/setup.bash
+export ROS_DOMAIN_ID=30
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+ros2 topic list | grep image_raw
+```
+
+Physical AI Manager에서 영상이 비어 있으면 북디텍션이 실행 중인지 확인하고 Manager에서
+`Refresh` 후 `/book_detection/image_raw`를 다시 선택합니다.
+
+CPU 실행 확인은 시작 로그의 다음 문구로 할 수 있습니다.
+
+```text
+Using CPU
+```

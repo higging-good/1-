@@ -8,8 +8,9 @@ from difflib import SequenceMatcher
 import cv2
 import numpy as np
 import rclpy
+import torch
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data, QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import Image, CompressedImage
 from cv_bridge import CvBridge
 from ultralytics import YOLO
@@ -18,7 +19,7 @@ import easyocr
 
 def normalize_text(text: str) -> str:
     text = text.lower()
-    text = re.sub(r"[^a-z0-9]+", " ", text)
+    text = re.sub(r"[^가-힣a-z0-9]+", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -34,9 +35,14 @@ def strict_match_score(target: str, ocr_text: str):
     if not target_n or not text_n:
         return 0.0, False
 
-    ratio = SequenceMatcher(None, target_n, text_n).ratio()
+    target_compact = target_n.replace(" ", "")
+    text_compact = text_n.replace(" ", "")
+    ratio = max(
+        SequenceMatcher(None, target_n, text_n).ratio(),
+        SequenceMatcher(None, target_compact, text_compact).ratio(),
+    )
 
-    if target_n in text_n:
+    if target_n in text_n or target_compact in text_compact:
         return max(ratio, 1.0), True
 
     target_words = [w for w in target_n.split() if len(w) >= 3]
@@ -45,21 +51,27 @@ def strict_match_score(target: str, ocr_text: str):
     if not target_words or not ocr_words:
         return ratio, False
 
-    hit = 0
+    word_scores = []
     for tw in target_words:
         best = max((word_similarity(tw, ow) for ow in ocr_words), default=0.0)
-        if len(tw) <= 3:
-            if best >= 0.90:
-                hit += 1
-        else:
-            if best >= 0.80:
-                hit += 1
+        word_scores.append(best)
 
-    token_score = hit / max(1, len(target_words))
+    token_score = sum(word_scores) / max(1, len(word_scores))
     final_score = max(ratio, token_score)
 
-    ok = token_score >= 0.999
+    # OCR은 I/L, U/V처럼 비슷한 글자를 자주 혼동하므로 완전 일치만
+    # 요구하지 않는다. 최종 허용 기준은 --min_match에서 한 번 더 검사한다.
+    ok = final_score >= 0.72
     return final_score, ok
+
+
+def enhance_for_ocr(image):
+    """책등의 작은 글자를 OCR하기 쉬운 고대비 영상으로 만든다."""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+    blurred = cv2.GaussianBlur(enhanced, (0, 0), 1.0)
+    return cv2.addWeighted(enhanced, 1.6, blurred, -0.6, 0)
 
 
 def order_points(pts):
@@ -138,17 +150,45 @@ class BookDetectionViewPublisher(Node):
         self.get_logger().info(f"찾을 책 제목: {self.target_title}")
         self.get_logger().info(f"입력 토픽: {args.input_topic}")
         self.get_logger().info(f"출력 토픽: {args.output_topic}")
-        self.get_logger().info("영상에는 박스만 표시합니다.")
+        self.get_logger().info(f"비압축 출력 토픽: {args.raw_output_topic}")
 
+        self.preview_ready = False
+        if args.preview:
+            try:
+                cv2.namedWindow("book_detection_view", cv2.WINDOW_NORMAL)
+                cv2.resizeWindow("book_detection_view", 960, 720)
+                cv2.moveWindow("book_detection_view", 20, 20)
+                loading = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(loading, "Loading YOLO / EasyOCR...", (75, 245),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                cv2.imshow("book_detection_view", loading)
+                cv2.waitKey(1)
+                self.preview_ready = True
+            except cv2.error as exc:
+                self.get_logger().error(f"OpenCV 뷰어 생성 실패: {exc}")
+
+        cv2.setNumThreads(1)
+        torch.set_num_threads(max(1, args.torch_threads))
+        use_gpu = args.gpu and torch.cuda.is_available()
+        if args.gpu and not use_gpu:
+            self.get_logger().warn("CUDA를 사용할 수 없어 CPU로 실행합니다.")
+
+        languages = args.languages
+        if languages == ["auto"]:
+            languages = ["ko", "en"] if re.search(r"[가-힣]", self.target_title) else ["en"]
+
+        self.get_logger().info("YOLO 모델 로딩 중...")
         self.model = YOLO(args.model)
-        self.reader = easyocr.Reader(["en"], gpu=args.gpu)
+        self.get_logger().info(f"EasyOCR 로딩 중... languages={languages}")
+        self.reader = easyocr.Reader(languages, gpu=use_gpu)
+        self.get_logger().info("초기화 완료. 카메라 프레임을 기다립니다.")
 
-        pub_qos = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=10,
-        )
-        self.pub = self.create_publisher(CompressedImage, args.output_topic, pub_qos)
+        # web_video_server (used by Physical AI Manager) subscribes reliably.
+        # Keep the camera input sensor-data QoS, but publish processed frames
+        # reliably so both ros_compressed and raw streams can connect.
+        output_qos = QoSProfile(depth=2, reliability=ReliabilityPolicy.RELIABLE)
+        self.pub = self.create_publisher(CompressedImage, args.output_topic, output_qos)
+        self.raw_pub = self.create_publisher(Image, args.raw_output_topic, output_qos)
 
         self.sub = self.create_subscription(
             Image,
@@ -161,6 +201,8 @@ class BookDetectionViewPublisher(Node):
         self.ocr_busy = False
         self.last_ocr_time = 0.0
         self.last_pub_time = 0.0
+        self.last_status_time = 0.0
+        self.frame_count = 0
 
         self.target_center = None
         self.candidate_center = None
@@ -169,7 +211,14 @@ class BookDetectionViewPublisher(Node):
         self.last_score = 0.0
 
     def detect_books(self, frame):
-        results = self.model(frame, conf=self.args.conf, verbose=False)
+        results = self.model.predict(
+            frame,
+            imgsz=self.args.imgsz,
+            conf=self.args.conf,
+            iou=0.40,
+            max_det=self.args.max_det,
+            verbose=False,
+        )
         if not results:
             return []
 
@@ -223,8 +272,8 @@ class BookDetectionViewPublisher(Node):
                         out = self.reader.readtext(c, detail=0, paragraph=True)
                         if out:
                             texts.append(" ".join(out))
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        self.get_logger().warn(f"OCR 처리 실패: {exc}")
 
                 merged = " ".join(texts).strip()
                 score, ok = strict_match_score(self.target_title, merged)
@@ -263,7 +312,8 @@ class BookDetectionViewPublisher(Node):
                         )
 
         finally:
-            self.ocr_busy = False
+            with self.lock:
+                self.ocr_busy = False
 
     def image_callback(self, msg):
         now = time.time()
@@ -271,6 +321,7 @@ class BookDetectionViewPublisher(Node):
         if now - self.last_pub_time < min_period:
             return
         self.last_pub_time = now
+        self.frame_count += 1
 
         try:
             frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
@@ -289,18 +340,39 @@ class BookDetectionViewPublisher(Node):
         with self.lock:
             target_center = self.target_center
 
-        for det in detections:
-            pts = np.array(det["pts"], dtype=np.int32).reshape(-1, 1, 2)
-            color = (0, 255, 0)
+        target_idx = None
+        if target_center is not None and detections:
+            nearest_idx = min(
+                range(len(detections)),
+                key=lambda idx: dist2(detections[idx]["center"], target_center),
+            )
+            if dist2(detections[nearest_idx]["center"], target_center) <= self.args.track_distance:
+                target_idx = nearest_idx
 
-            if target_center is not None and dist2(det["center"], target_center) <= self.args.track_distance:
-                color = (0, 0, 255)
+        for idx, det in enumerate(detections):
+            pts = np.array(det["pts"], dtype=np.int32).reshape(-1, 1, 2)
+            color = (0, 0, 255) if idx == target_idx else (0, 255, 0)
 
             cv2.polylines(draw, [pts], isClosed=True, color=color, thickness=3)
 
-        if detections and (not self.ocr_busy) and (now - self.last_ocr_time >= self.args.ocr_interval):
-            self.last_ocr_time = now
-            self.ocr_busy = True
+        if now - self.last_status_time >= 2.0:
+            self.last_status_time = now
+            self.get_logger().info(
+                f"프레임 수신 정상: frame={self.frame_count}, YOLO books={len(detections)}, "
+                f"OCR={'running' if self.ocr_busy else 'idle'}"
+            )
+
+        with self.lock:
+            start_ocr = (
+                bool(detections)
+                and not self.ocr_busy
+                and now - self.last_ocr_time >= self.args.ocr_interval
+            )
+            if start_ocr:
+                self.last_ocr_time = now
+                self.ocr_busy = True
+
+        if start_ocr:
             frame_copy = frame.copy()
             det_copy = [
                 {
@@ -320,7 +392,11 @@ class BookDetectionViewPublisher(Node):
             out.data = encoded.tobytes()
             self.pub.publish(out)
 
-        if self.args.preview:
+        raw = self.bridge.cv2_to_imgmsg(draw, encoding="bgr8")
+        raw.header = msg.header
+        self.raw_pub.publish(raw)
+
+        if self.args.preview and self.preview_ready:
             cv2.imshow("book_detection_view", draw)
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
@@ -332,6 +408,7 @@ def parse_args():
     parser.add_argument("--target", default="", help="Target book title. If empty, ask interactively.")
     parser.add_argument("--input_topic", default="/camera/color/image_raw")
     parser.add_argument("--output_topic", default="/book_detection/image_raw/compressed")
+    parser.add_argument("--raw_output_topic", default="/book_detection/image_raw")
     parser.add_argument("--model", default="models/book_spine_detector.pt")
     parser.add_argument("--conf", type=float, default=0.30)
     parser.add_argument("--ocr_interval", type=float, default=2.5)
@@ -340,6 +417,11 @@ def parse_args():
     parser.add_argument("--confirm_hits", type=int, default=2)
     parser.add_argument("--track_distance", type=float, default=70.0)
     parser.add_argument("--jpeg_quality", type=int, default=80)
+    parser.add_argument("--imgsz", type=int, default=640)
+    parser.add_argument("--max_det", type=int, default=20)
+    parser.add_argument("--ocr_max_candidates", type=int, default=8)
+    parser.add_argument("--torch_threads", type=int, default=4)
+    parser.add_argument("--languages", nargs="+", default=["auto"])
     parser.add_argument("--gpu", action="store_true")
     parser.add_argument("--preview", action="store_true")
     return parser.parse_args()
