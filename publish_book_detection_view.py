@@ -157,8 +157,6 @@ class BookDetectionViewPublisher(Node):
 
         self.target_title = args.target.strip()
         if not self.target_title:
-            self.target_title = input("찾을 책 제목을 입력하세요: ").strip()
-        if not self.target_title:
             raise SystemExit("[ERROR] 책 제목이 비어 있습니다.")
 
         self.preview_ready = False
@@ -450,6 +448,19 @@ def parse_args():
 
 def main():
     args = parse_args()
+
+    # Ask before initializing ROS/Fast DDS. Otherwise DDS diagnostics from
+    # background threads can be printed on the same line as the input prompt.
+    if not args.target.strip():
+        try:
+            args.target = input("찾을 책 제목을 입력하세요: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+    if not args.target:
+        print("[ERROR] 책 제목이 비어 있습니다.")
+        return
+
     rclpy.init()
     node = BookDetectionViewPublisher(args)
     try:
