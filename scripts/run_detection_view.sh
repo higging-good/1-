@@ -20,13 +20,22 @@ export CUDA_VISIBLE_DEVICES=""
 
 BOOK_CAMERA_TOPIC="${BOOK_CAMERA_TOPIC:-/camera/color/image_raw}"
 BOOK_TARGET="${1:-}"
-TARGET_ARGS=()
-[[ -n "${BOOK_TARGET}" ]] && TARGET_ARGS=(--target "${BOOK_TARGET}")
 
 if [[ ! -x "${PROJECT_DIR}/.venv/bin/python3" ]]; then
   echo "[ERROR] 가상환경이 없습니다. 먼저 ./scripts/install.sh 를 실행하세요."
   exit 1
 fi
+
+# Ask before starting the viewer so no empty window appears while the user is
+# still entering the target title.
+if [[ -z "${BOOK_TARGET}" ]]; then
+  read -r -p "찾을 책 제목을 입력하세요: " BOOK_TARGET
+fi
+if [[ -z "${BOOK_TARGET//[[:space:]]/}" ]]; then
+  echo "[ERROR] 책 제목이 비어 있습니다."
+  exit 1
+fi
+TARGET_ARGS=(--target "${BOOK_TARGET}")
 
 PYTHONNOUSERSITE=1 /usr/bin/python3 view_book_detection.py \
   --topic /book_detection/image_raw >/dev/null 2>&1 &
