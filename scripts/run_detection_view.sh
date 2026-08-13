@@ -29,7 +29,7 @@ if [[ ! -x "${PROJECT_DIR}/.venv/bin/python3" ]]; then
 fi
 
 PYTHONNOUSERSITE=1 /usr/bin/python3 view_book_detection.py \
-  --topic /book_detection/image_raw &
+  --topic /book_detection/image_raw >/dev/null 2>&1 &
 VIEWER_PID=$!
 
 cleanup() {

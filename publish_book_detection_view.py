@@ -3,6 +3,7 @@ import argparse
 import re
 import time
 import threading
+import warnings
 from difflib import SequenceMatcher
 
 import cv2
@@ -15,6 +16,19 @@ from sensor_msgs.msg import Image, CompressedImage
 from cv_bridge import CvBridge
 from ultralytics import YOLO
 import easyocr
+
+
+# CPU OCR 첫 실행 시 출력되는 PyTorch 내부 폐기 예정 경고만 숨긴다.
+warnings.filterwarnings(
+    "ignore",
+    message=r".*torch\.quantize_per_tensor.*deprecated.*",
+    category=UserWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r".*pin_memory.*no accelerator.*",
+    category=UserWarning,
+)
 
 
 def normalize_text(text: str) -> str:
@@ -147,11 +161,6 @@ class BookDetectionViewPublisher(Node):
         if not self.target_title:
             raise SystemExit("[ERROR] 책 제목이 비어 있습니다.")
 
-        self.get_logger().info(f"찾을 책 제목: {self.target_title}")
-        self.get_logger().info(f"입력 토픽: {args.input_topic}")
-        self.get_logger().info(f"출력 토픽: {args.output_topic}")
-        self.get_logger().info(f"비압축 출력 토픽: {args.raw_output_topic}")
-
         self.preview_ready = False
         if args.preview:
             try:
@@ -177,11 +186,10 @@ class BookDetectionViewPublisher(Node):
         if languages == ["auto"]:
             languages = ["ko", "en"] if re.search(r"[가-힣]", self.target_title) else ["en"]
 
-        self.get_logger().info("YOLO 모델 로딩 중...")
         self.model = YOLO(args.model)
-        self.get_logger().info(f"EasyOCR 로딩 중... languages={languages}")
-        self.reader = easyocr.Reader(languages, gpu=use_gpu)
-        self.get_logger().info("초기화 완료. 카메라 프레임을 기다립니다.")
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, module=r"torch\..*")
+            self.reader = easyocr.Reader(languages, gpu=use_gpu, verbose=False)
 
         # web_video_server (used by Physical AI Manager) subscribes reliably.
         # Keep the camera input sensor-data QoS, but publish processed frames
@@ -254,6 +262,7 @@ class BookDetectionViewPublisher(Node):
     def ocr_worker(self, frame, detections):
         try:
             best = None
+            recognized_texts = []
 
             for idx, det in enumerate(detections):
                 crop = warp_obb_crop(frame, det["pts"])
@@ -276,6 +285,8 @@ class BookDetectionViewPublisher(Node):
                         self.get_logger().warn(f"OCR 처리 실패: {exc}")
 
                 merged = " ".join(texts).strip()
+                if merged and merged not in recognized_texts:
+                    recognized_texts.append(merged)
                 score, ok = strict_match_score(self.target_title, merged)
 
                 if best is None or score > best["score"]:
@@ -290,9 +301,18 @@ class BookDetectionViewPublisher(Node):
             if best is None:
                 return
 
-            self.get_logger().info(
-                f"OCR best text='{best['text']}' score={best['score']:.3f} ok={best['ok']}"
+            readable = " | ".join(
+                f"[{idx}] {text[:100]}" for idx, text in enumerate(recognized_texts, start=1)
             )
+            if not readable:
+                readable = "(인식된 글자 없음)"
+            self.get_logger().info(
+                f"OCR 읽은 글자: {readable} | 최고 유사도={best['score']:.3f}"
+            )
+
+            with self.lock:
+                self.last_ocr_text = best["text"] or "인식 없음"
+                self.last_score = best["score"]
 
             if best["ok"] and best["score"] >= self.args.min_match:
                 with self.lock:
@@ -302,13 +322,11 @@ class BookDetectionViewPublisher(Node):
                         self.candidate_center = best["center"]
                         self.candidate_hits = 1
 
-                    self.last_ocr_text = best["text"]
-                    self.last_score = best["score"]
-
                     if self.candidate_hits >= self.args.confirm_hits:
                         self.target_center = self.candidate_center
                         self.get_logger().info(
-                            f"목표책 확정: hits={self.candidate_hits}, score={best['score']:.3f}"
+                            f"목표책 확정: '{best['text']}' "
+                            f"hits={self.candidate_hits}, score={best['score']:.3f}"
                         )
 
         finally:
@@ -339,6 +357,8 @@ class BookDetectionViewPublisher(Node):
 
         with self.lock:
             target_center = self.target_center
+            last_ocr_text = self.last_ocr_text or "대기 중"
+            last_score = self.last_score
 
         target_idx = None
         if target_center is not None and detections:
@@ -359,7 +379,8 @@ class BookDetectionViewPublisher(Node):
             self.last_status_time = now
             self.get_logger().info(
                 f"프레임 수신 정상: frame={self.frame_count}, YOLO books={len(detections)}, "
-                f"OCR={'running' if self.ocr_busy else 'idle'}"
+                f"OCR={'running' if self.ocr_busy else 'idle'}, "
+                f"최근 OCR='{last_ocr_text}', 유사도={last_score:.3f}"
             )
 
         with self.lock:
