@@ -215,6 +215,7 @@ class BookDetectionViewPublisher(Node):
         self.candidate_hits = 0
         self.last_ocr_text = ""
         self.last_score = 0.0
+        self.ocr_candidate_cursor = 0
 
     def detect_books(self, frame):
         results = self.model.predict(
@@ -267,22 +268,21 @@ class BookDetectionViewPublisher(Node):
                 if crop is None:
                     continue
 
-                crops = [
-                    crop,
-                    cv2.rotate(crop, cv2.ROTATE_90_CLOCKWISE),
-                    cv2.rotate(crop, cv2.ROTATE_90_COUNTERCLOCKWISE),
-                ]
-
-                texts = []
-                for c in crops:
-                    try:
-                        out = self.reader.readtext(c, detail=0, paragraph=True)
-                        if out:
-                            texts.append(" ".join(out))
-                    except Exception as exc:
-                        self.get_logger().warn(f"OCR 처리 실패: {exc}")
-
-                merged = " ".join(texts).strip()
+                try:
+                    # Detect text once, then let EasyOCR batch the rotated text
+                    # recognition instead of running three full OCR passes.
+                    out = self.reader.readtext(
+                        crop,
+                        detail=0,
+                        paragraph=True,
+                        rotation_info=[90, 270],
+                        batch_size=4,
+                        workers=0,
+                    )
+                    merged = " ".join(out).strip() if out else ""
+                except Exception as exc:
+                    self.get_logger().warn(f"OCR 처리 실패: {exc}")
+                    merged = ""
                 if merged and merged not in recognized_texts:
                     recognized_texts.append(merged)
                 score, ok = strict_match_score(self.target_title, merged)
@@ -393,13 +393,25 @@ class BookDetectionViewPublisher(Node):
 
         if start_ocr:
             frame_copy = frame.copy()
+            ordered_detections = sorted(detections, key=lambda det: det["center"][0])
+            candidate_count = min(len(ordered_detections), self.args.ocr_max_candidates)
+            if candidate_count < len(ordered_detections):
+                start = self.ocr_candidate_cursor % len(ordered_detections)
+                selected = [
+                    ordered_detections[(start + offset) % len(ordered_detections)]
+                    for offset in range(candidate_count)
+                ]
+                self.ocr_candidate_cursor = (start + candidate_count) % len(ordered_detections)
+            else:
+                selected = ordered_detections
+
             det_copy = [
                 {
                     "pts": np.array(d["pts"], dtype=np.float32).copy(),
                     "center": tuple(d["center"]),
                     "conf": d["conf"],
                 }
-                for d in detections
+                for d in selected
             ]
             threading.Thread(target=self.ocr_worker, args=(frame_copy, det_copy), daemon=True).start()
 

@@ -49,10 +49,11 @@ python3 publish_book_detection_view.py \
   --raw_output_topic /book_detection/image_raw \
   --model models/book_spine_detector.pt \
   --conf "${BOOK_CONFIDENCE:-0.40}" \
-  --ocr_interval 0.7 \
-  --min_match 0.90 \
+  --ocr_interval "${BOOK_OCR_INTERVAL:-0.2}" \
+  --min_match "${BOOK_MIN_MATCH:-0.80}" \
   --confirm_hits 1 \
   --track_distance 25 \
   --fps 15 \
+  --ocr_max_candidates "${BOOK_OCR_CANDIDATES:-4}" \
   --torch_threads 4 \
   --languages auto
