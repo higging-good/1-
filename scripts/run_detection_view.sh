@@ -18,7 +18,7 @@ export RMW_IMPLEMENTATION="${BOOK_RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
 export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-${PROJECT_DIR}/config/fastdds_udp_only.xml}"
 export CUDA_VISIBLE_DEVICES=""
 
-BOOK_CAMERA_TOPIC="${BOOK_CAMERA_TOPIC:-/camera2/color/image_raw}"
+BOOK_CAMERA_TOPIC="${BOOK_CAMERA_TOPIC:-/camera/color/image_raw}"
 BOOK_TARGET="${1:-}"
 TARGET_ARGS=()
 [[ -n "${BOOK_TARGET}" ]] && TARGET_ARGS=(--target "${BOOK_TARGET}")

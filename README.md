@@ -15,7 +15,8 @@ Astra 카메라 영상에서 YOLOv8-OBB로 책등을 검출하고 EasyOCR로 사
 - ROS 2 raw 및 compressed 결과 동시 발행
 - Physical AI Manager의 `web_video_server`와 호환되는 RELIABLE QoS
 - 설치 위치와 Linux 사용자명에 의존하지 않는 실행 스크립트
-- 한 대 카메라와 두 대 카메라 구성을 모두 지원
+- 카메라 한 대만으로 전체 북디텍션 데모 실행
+- 필요할 때 입력 토픽 변경으로 Physical AI 두 카메라 구성도 지원
 
 ## 1. 새 컴퓨터 설치 및 시작
 
@@ -93,12 +94,13 @@ ORBBEC_WS=/path/to/orbbec_ws ./scripts/run_detection_view.sh
 
 ## 2. 빠른 실행 가이드
 
-### 현재 Physical AI 두 카메라 구성
+### 기본 데모: 카메라 한 대
 
-터미널 1에서 카메라 두 대를 실행합니다. 이 파일은 현재 시스템용 외부 실행기입니다.
+터미널 1에서 Astra 카메라 한 대를 실행합니다.
 
 ```bash
-~/run_two_astra_clean.sh
+cd ~/Desktop/book_detection_project
+./scripts/run_astra_camera.sh
 ```
 
 터미널 2에서 북디텍션을 실행합니다.
@@ -120,20 +122,21 @@ run_detection
 찾을 책 제목을 입력하세요: BUTTER
 ```
 
-현재 기본 입력은 `/camera2/color/image_raw`입니다.
+현재 기본 입력은 `/camera/color/image_raw`입니다. 따라서 별도 토픽 설정 없이 카메라
+한 대로 실행됩니다.
 
-### 카메라 한 대인 컴퓨터
+### Physical AI 두 카메라 구성은 선택 사항
 
-카메라 토픽을 확인합니다.
+카메라 2번을 북디텍션 입력으로 사용하는 시스템에서만 다음처럼 지정합니다.
+
+```bash
+BOOK_CAMERA_TOPIC=/camera2/color/image_raw ./scripts/run_detection_view.sh
+```
+
+카메라 토픽을 모르면 먼저 확인합니다.
 
 ```bash
 ros2 topic list | grep image_raw
-```
-
-일반적인 한 대 카메라 토픽이 `/camera/color/image_raw`라면 다음처럼 실행합니다.
-
-```bash
-BOOK_CAMERA_TOPIC=/camera/color/image_raw ./scripts/run_detection_view.sh
 ```
 
 카메라 네임스페이스가 다르면 실제 토픽으로 바꾸면 됩니다.
@@ -152,7 +155,7 @@ BOOK_CAMERA_TOPIC=/my_camera/color/image_raw ./scripts/run_detection_view.sh
 
 | 설정 | 기본값 | 용도 |
 |---|---|---|
-| `BOOK_CAMERA_TOPIC` | `/camera2/color/image_raw` | 북디텍션 입력 영상 |
+| `BOOK_CAMERA_TOPIC` | `/camera/color/image_raw` | 북디텍션 입력 영상 |
 | `BOOK_CONFIDENCE` | `0.40` | YOLO 책 검출 임계값; 높일수록 초록색 오탐 감소 |
 | `ROS_DOMAIN_ID` | `30` | ROS 2 통신 도메인 |
 | `ROS_LOCALHOST_ONLY` | `0` | 다른 프로세스·컨테이너 통신 허용 |
